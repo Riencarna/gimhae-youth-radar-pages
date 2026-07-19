@@ -1,0 +1,54 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout deployment files
+        uses: actions/checkout@v6
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Validate static allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f site/index.html
+          test -f site/deployment.json
+          unexpected="$(find site -type f | sed 's#^site/##' | grep -Ev '^(\.nojekyll|index\.html|og\.png|deployment\.json|assets/[A-Za-z0-9._-]+\.(js|css))$' || true)"
+          test -z "$unexpected"
+          if find site -type f ! -name '*.png' -print0 | xargs -0 grep -E -n 'YOUTH_CENTER_API_KEY|YOUTH_RADAR_ADMIN_EMAIL|/api/policies|/api/sources|/admin|chatgpt-auth|D1Database'; then
+            echo "Forbidden server or secret marker found in Pages artifact" >&2
+            exit 1
+          fi
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
